@@ -1,3 +1,5 @@
+# DISCLAIMER: Currently this code does not work unless it is in the directory 'AirSim\PythonClient\multirotor', we can fix that later. For now it is in the outermost location, which I think makes sense as the final location
+
 import setup_path
 import airsim
 
