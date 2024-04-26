@@ -2,6 +2,7 @@ import AirSim.PythonClient.multirotor.setup_path as setup_path
 import airsim
 import gym
 import pprint
+from stable_baselines3 import DQN
 
 # connect to the AirSim simulator
 client = airsim.MultirotorClient()
@@ -11,7 +12,7 @@ client.enableApiControl(True)
 state = client.getMultirotorState()
 s = pprint.pformat(state)
 # print("state: %s" % s)
-print(state.kinematics_estimated.position.x_val)
+# print(state.kinematics_estimated.position.x_val)
 
 class AirSimEnv(gym.Env):
     def __init__(self):
@@ -34,6 +35,7 @@ class AirSimEnv(gym.Env):
         self.R_cp = -1
         self.del_d_l = -1
         self.del_d_u = 1
+
     @staticmethod
     def start_client():
         client = airsim.MultirotorClient()
@@ -99,10 +101,14 @@ class AirSimEnv(gym.Env):
         return state, reward, done, {}
 
     def get_reward(self, old_d, new_d):
-        del_d = new_d - old_d
-        d_t = new_d
-        if self.del_d_u < del_d:
-            return self.R_l/d_t
+        # del_d = new_d - old_d
+        # d_t = new_d
+        # if self.del_d_u < del_d:
+        #     return self.R_l/d_t
+        if new_d < 1.0:
+            return 5
+        else:
+            return -0.01
 
     def calculate_distance_to_goal(self):
         # Calculate distance from current position to goal
@@ -112,3 +118,6 @@ class AirSimEnv(gym.Env):
 
 
 
+env = AirSimEnv
+model = DQN("MlpPolicy", env, verbose=1)
+model.learn(total_timesteps=10000, log_interval=4)
