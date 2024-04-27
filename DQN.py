@@ -1,3 +1,5 @@
+import time
+
 import AirSim.PythonClient.multirotor.setup_path as setup_path
 import airsim
 import gym
@@ -26,10 +28,11 @@ class AirSimEnv(gymnasium.Env):
 
         # Initialize environment variables
         self.start_position = np.array([0.0, 0.0, 0.0])
-        self.goal_position = np.array([10.0, 10.0, 0.0])
+        self.goal_position = np.array([7.0, 0.0, 0.0])
         self.current_position = self.start_position
+        self.goal_threshold = 2.0
 
-        self.move_time = 2
+        self.move_time = 0.5
 
         # Set up rewards
         self.R_l = 0.0
@@ -54,6 +57,8 @@ class AirSimEnv(gymnasium.Env):
 
     def reset(self, seed=None, options=None):
         # Reset the environment to the starting state
+        self.client.reset()
+        self.client.enableApiControl(True)
         self.current_position = self.start_position
         observation = self.current_position  # Set initial observation
         info = self._get_info()  # dictionary for additional information
@@ -103,22 +108,32 @@ class AirSimEnv(gymnasium.Env):
         # Get state (observations)
         state = self.current_position
 
+        collision_check = self.client.simGetCollisionInfo().has_collided
+        if collision_check:
+            print("COLLISION! Resetting...")
+
         # Calculate reward
-        reward = self.get_reward(old_distance, new_distance)
+        reward = self.get_reward(old_distance, new_distance, collision_check)
+        print(f'Distance to goal: {new_distance}, Reward: {reward}')
 
         # Check if episode is done (close to goal)
-        done = (new_distance < 1.0)
+        done = (new_distance < self.goal_threshold)
+        if done:
+            print("GOAL REACHED!")
 
         info = self._get_info()  # dictionary for additional information
 
-        return state, reward, done, False, info
+        return state, reward, done, collision_check, info
 
-    def get_reward(self, old_d, new_d):
+    def get_reward(self, old_d, new_d, collision_check):
         # del_d = new_d - old_d
         # d_t = new_d
         # if self.del_d_u < del_d:
         #     return self.R_l/d_t
-        if new_d < 1.0:
+
+        if collision_check:
+            return -1
+        if new_d < self.goal_threshold:
             return 5
         else:
             return -0.01
@@ -134,15 +149,32 @@ class AirSimEnv(gymnasium.Env):
 
 
 
+def main():
+    # Register the environment
+    gymnasium.register(
+        id='AirSimEnv-v0',
+        entry_point=lambda: AirSimEnv(),
+        max_episode_steps=300
+    )
+    # gym.envs.register(id='AirSimEnv-v0', entry_point=AirSimEnv)
+    temp_env = gymnasium.make('AirSimEnv-v0')
+    env = DummyVecEnv([lambda: temp_env])
 
-# Register the environment
-gymnasium.register(
-    id='AirSimEnv-v0',
-    entry_point=lambda: AirSimEnv()
-)
-# gym.envs.register(id='AirSimEnv-v0', entry_point=AirSimEnv)
-temp_env = gymnasium.make('AirSimEnv-v0')
-env = DummyVecEnv([lambda: temp_env])
+    model = DQN("MlpPolicy", env, verbose=1)
+    print("Starting training...")
+    model.learn(total_timesteps=200, log_interval=4)
+    print("Training complete!")
 
-model = DQN("MlpPolicy", env, verbose=1)
-model.learn(total_timesteps=10000, log_interval=4)
+    # Play after training
+    airsim.wait_key('Press any key to reset to original state')
+    obs = env.reset()
+    while True:
+        action, _states = model.predict(obs, deterministic=True)
+        obs, reward, terminated, truncated = env.step(action)
+        print(f"Terminated: {terminated}, Truncated: {truncated}")
+        if terminated or truncated:
+            obs = env.reset()
+
+
+if __name__ == '__main__':
+    main()
