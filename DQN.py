@@ -1,8 +1,11 @@
 import AirSim.PythonClient.multirotor.setup_path as setup_path
 import airsim
 import gym
+import gymnasium
 import pprint
+import numpy as np
 from stable_baselines3 import DQN
+from stable_baselines3.common.vec_env import DummyVecEnv
 
 # connect to the AirSim simulator
 client = airsim.MultirotorClient()
@@ -22,8 +25,8 @@ class AirSimEnv(gym.Env):
         self.observation_space = gym.spaces.Box(low=-1, high=1, shape=(3,), dtype=float)  # Example state space (e.g., position)
 
         # Initialize environment variables
-        self.start_position = (0, 0, 0)  # Starting position
-        self.goal_position = (10, 10, 0)  # Goal position
+        self.start_position = np.array([0, 0, 0])  # Starting position
+        self.goal_position = np.array([10, 10, 0])  # Goal position
         self.current_position = self.start_position
 
         self.move_time = 2
@@ -43,12 +46,17 @@ class AirSimEnv(gym.Env):
         client.enableApiControl(True)
         return client
 
-    def reset_env(self):
+    def _get_obs(self):
+        return
+
+    def reset(self):
         # Reset the environment to the starting state
         self.current_position = self.start_position
-        return self.current_position
+        observation = self.current_position  # Set initial observation
+        return observation
 
-    def get_position(self):
+    @staticmethod
+    def get_position():
         # Gets current position from robot state
         cur_state = client.getMultirotorState()
         x = cur_state.kinematics_estimated.position.x_val
@@ -118,6 +126,17 @@ class AirSimEnv(gym.Env):
 
 
 
-env = AirSimEnv
+
+# Register the environment
+gym.envs.register(id='AirSimEnv-v0', entry_point=AirSimEnv)
+temp_env = gym.make('AirSimEnv-v0')
+env = DummyVecEnv([lambda: temp_env])
+
 model = DQN("MlpPolicy", env, verbose=1)
 model.learn(total_timesteps=10000, log_interval=4)
+
+
+
+# Close AirSim client connection
+client.reset()
+client.enableApiControl(False)
