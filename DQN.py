@@ -8,25 +8,25 @@ from stable_baselines3 import DQN
 from stable_baselines3.common.vec_env import DummyVecEnv
 
 # connect to the AirSim simulator
-client = airsim.MultirotorClient()
-client.confirmConnection()
-client.enableApiControl(True)
-
-state = client.getMultirotorState()
-s = pprint.pformat(state)
+# client = airsim.MultirotorClient()
+# client.confirmConnection()
+# client.enableApiControl(True)
+#
+# state = client.getMultirotorState()
+# s = pprint.pformat(state)
 # print("state: %s" % s)
 # print(state.kinematics_estimated.position.x_val)
 
-class AirSimEnv(gym.Env):
+class AirSimEnv(gymnasium.Env):
     def __init__(self):
         super(AirSimEnv, self).__init__()
         self.client = self.start_client()
-        self.action_space = gym.spaces.Discrete(9)  # 9 discrete actions
-        self.observation_space = gym.spaces.Box(low=-1, high=1, shape=(3,), dtype=float)  # Example state space (e.g., position)
+        self.action_space = gymnasium.spaces.Discrete(9)  # 9 discrete actions
+        self.observation_space = gymnasium.spaces.Box(low=-1, high=1, shape=(3,), dtype=float)  # Example state space (e.g., position)
 
         # Initialize environment variables
-        self.start_position = np.array([0, 0, 0])  # Starting position
-        self.goal_position = np.array([10, 10, 0])  # Goal position
+        self.start_position = np.array([0.0, 0.0, 0.0])
+        self.goal_position = np.array([10.0, 10.0, 0.0])
         self.current_position = self.start_position
 
         self.move_time = 2
@@ -47,22 +47,25 @@ class AirSimEnv(gym.Env):
         return client
 
     def _get_obs(self):
-        return
+        return {}
 
-    def reset(self):
+    def _get_info(self):
+        return {}
+
+    def reset(self, seed=None, options=None):
         # Reset the environment to the starting state
         self.current_position = self.start_position
         observation = self.current_position  # Set initial observation
-        return observation
+        info = self._get_info()  # dictionary for additional information
+        return observation, info
 
-    @staticmethod
-    def get_position():
+    def get_position(self):
         # Gets current position from robot state
-        cur_state = client.getMultirotorState()
+        cur_state = self.client.getMultirotorState()
         x = cur_state.kinematics_estimated.position.x_val
         y = cur_state.kinematics_estimated.position.y_val
         z = cur_state.kinematics_estimated.position.z_val
-        position = (x,y,z)
+        position = np.array([x,y,z])
         return position
 
     def step(self, action):
@@ -106,7 +109,9 @@ class AirSimEnv(gym.Env):
         # Check if episode is done (close to goal)
         done = (new_distance < 1.0)
 
-        return state, reward, done, {}
+        info = self._get_info()  # dictionary for additional information
+
+        return state, reward, done, False, info
 
     def get_reward(self, old_d, new_d):
         # del_d = new_d - old_d
@@ -120,16 +125,18 @@ class AirSimEnv(gym.Env):
 
     def calculate_distance_to_goal(self):
         # Calculate distance from current position to goal
-        return ((self.current_position[0] - self.goal_position[0]) ** 2 +
-                (self.current_position[1] - self.goal_position[1]) ** 2 +
-                (self.current_position[2] - self.goal_position[2]) ** 2) ** 0.5
+        return np.linalg.norm(np.array(self.current_position) - np.array(self.goal_position))
 
 
 
 
 # Register the environment
-gym.envs.register(id='AirSimEnv-v0', entry_point=AirSimEnv)
-temp_env = gym.make('AirSimEnv-v0')
+gymnasium.register(
+    id='AirSimEnv-v0',
+    entry_point=lambda: AirSimEnv()
+)
+# gym.envs.register(id='AirSimEnv-v0', entry_point=AirSimEnv)
+temp_env = gymnasium.make('AirSimEnv-v0')
 env = DummyVecEnv([lambda: temp_env])
 
 model = DQN("MlpPolicy", env, verbose=1)
