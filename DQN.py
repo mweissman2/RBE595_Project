@@ -127,6 +127,11 @@ class AirSimEnv(gymnasium.Env):
         # Calculate distance from current position to goal
         return np.linalg.norm(np.array(self.current_position) - np.array(self.goal_position))
 
+    def close_stream(self):
+        # Close AirSim client connection
+        self.client.reset()
+        self.client.enableApiControl(False)
+
 
 
 
@@ -141,9 +146,3 @@ env = DummyVecEnv([lambda: temp_env])
 
 model = DQN("MlpPolicy", env, verbose=1)
 model.learn(total_timesteps=10000, log_interval=4)
-
-
-
-# Close AirSim client connection
-client.reset()
-client.enableApiControl(False)
