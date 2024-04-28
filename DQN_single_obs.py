@@ -50,14 +50,14 @@ class AirSimEnv(gymnasium.Env):
         self.sim_initialization()
 
         self.action_space = gymnasium.spaces.Discrete(9)  # 10 discrete actions
-        # self.observation_space = gymnasium.spaces.Dict(
-        #     {
-        #     "position": gymnasium.spaces.Box(low=0, high=2, shape=(3,), dtype=float)  # Position
-        #     "image": gymnasium.spaces.Box(low=0, high=255, shape=(144,256), dtype=np.uint8)
-        #     }
-        # )
+        self.observation_space = gymnasium.spaces.Dict(
+            {
+            "position": gymnasium.spaces.Box(low=-150, high=150, shape=(3,), dtype=float),  # Position
+            "image": gymnasium.spaces.Box(low=0, high=255, shape=(144,256,1), dtype=np.uint8),
+            }
+        )
         # self.observation_space = gymnasium.spaces.Box(low=-20, high=20, shape=(3,), dtype=float)
-        self.observation_space = gymnasium.spaces.Box(low=0, high=255, shape=(144,256,1), dtype=np.uint8)
+        # self.observation_space = gymnasium.spaces.Box(low=0, high=255, shape=(144,256,1), dtype=np.uint8)
 
         # Set up rewards
         self.R_l = 0.0
@@ -111,7 +111,11 @@ class AirSimEnv(gymnasium.Env):
 
 
     def _get_obs(self):
-        return self.get_depth_img()
+        relative_pos = self.set_point_position - self.current_position
+        R = self.get_rotation_mat()
+        relative_pos_transformed = np.dot(R, relative_pos)
+        depth = self.get_depth_img()
+        return {"position": relative_pos_transformed, "image": depth, }
 
     def _get_info(self):
         return {}
@@ -189,51 +193,50 @@ class AirSimEnv(gymnasium.Env):
             done = True
             print("COLLISION! Resetting...")
 
+        # Calculate reward
+        reward = self.get_reward(old_distance, new_distance, collision_check)
+        print(f'Distance to setpoint: {new_distance}, Setpoint Position: {self.set_point_position}, Reward: {reward}')
+        # print(f'Observation: {obs}')
+
         # Check if episode is done (close to goal)
         distance_to_goal = self.calculate_distance_to_goal()
         goal_reached = (distance_to_goal < self.goal_threshold)
         if goal_reached:
             done = True
+            reward = 20
             print("GOAL REACHED!")
 
-        # Calculate reward
-        reward = self.get_reward(old_distance, new_distance, collision_check)
-        print(f'Distance to setpoint: {new_distance}, Setpoint Position: {self.set_point_position}, Reward: {reward}')
-        # print(f'Observation: {obs}')
         info = self._get_info()  # dictionary for additional information
 
         return obs, reward, done, False, info
 
     def get_reward(self, old_d, new_d, collision_check):
-        del_d = new_d - old_d
-        d_t = new_d
+        # del_d = new_d - old_d
+        # d_t = new_d
+        #
+        # if collision_check:
+        #     reward = -1
+        # elif self.del_d_u < del_d:
+        #     reward = self.R_l/d_t
+        # elif del_d >= self.del_d_l and del_d <= self.del_d_u:
+        #     reward = self.R_l + (self.R_u - self.R_l) * ((self.del_d_u - del_d) / (self.del_d_u - self.del_d_l))
+        # elif del_d < self.del_d_l:
+        #     reward = self.R_u/d_t
+        # else:
+        #     reward = self.R_dp
+        #
 
         if collision_check:
-            reward = -1
-        elif self.del_d_u < del_d:
-            reward = self.R_l/d_t
-        elif del_d >= self.del_d_l and del_d <= self.del_d_u:
-            reward = self.R_l + (self.R_u - self.R_l) * ((self.del_d_u - del_d) / (self.del_d_u - self.del_d_l))
-        elif del_d < self.del_d_l:
-            reward = self.R_u/d_t
+            reward = -10
+            chosen = 1
+        elif new_d < 2:
+            reward = 0.5
+            chosen = 2
         else:
-            reward = self.R_dp
+            reward = .1 - (1 / new_d)
+            chosen = -1
 
         return reward
-
-        # # If we have collide, reward with -1
-        # if collision_check:
-        #     reward = -100
-        # # If we are far from the setpoint, reward 0
-        # elif new_d > 4.0:
-        #     reward = -new_d
-        # # If we are close to the setpoint, variable reward
-        # elif new_d <= 4.0:
-        #     # reward = self.R_u * ((self.del_d_u - new_d) / (self.del_d_u - self.del_d_l))
-        #     reward = 1/new_d
-        # else:
-        #     reward = -0.01
-        # return reward
 
     def calculate_distance_to_goal(self):
         # Calculate distance from current position to goal
@@ -286,7 +289,7 @@ def main():
 
     # model = DQN("CnnPolicy", env, verbose=1, exploration_fraction=0.1)
     model = DQN(
-        "CnnPolicy",
+        "MultiInputPolicy",
         env,
         learning_rate=0.00025,
         verbose=1,
