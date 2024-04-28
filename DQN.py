@@ -5,6 +5,7 @@ import airsim
 import gym
 import gymnasium
 import pprint
+import math
 import numpy as np
 from stable_baselines3 import DQN
 from stable_baselines3.common.vec_env import DummyVecEnv
@@ -27,12 +28,27 @@ class AirSimEnv(gymnasium.Env):
         self.observation_space = gymnasium.spaces.Box(low=-1, high=1, shape=(3,), dtype=float)  # Example state space (e.g., position)
 
         # Initialize environment variables
-        self.start_position = np.array([0.0, 0.0, 0.0])
-        self.goal_position = np.array([7.0, 0.0, 0.0])
+        self.start_position = np.array([-5.0, 0.0, -1.0])
+        self.goal_position = np.array([10.0, 0.0, -4.0])
         self.current_position = self.start_position
-        self.goal_threshold = 2.0
+        self.goal_threshold = 1.0
+        self.initial_pose = self.client.simGetVehiclePose()
+        self.sim_initialization()
 
-        self.move_time = 0.5
+        # Moving Setpoint Variables
+        #self.magnitude = math.sqrt(pow(self.goal_position[0]-self.start_position[0],2) + pow(self.goal_position[1]-self.start_position[1],2) + pow(self.goal_position[2]-self.start_position[2],2))
+        self.magnitude = np.linalg.norm(np.array(self.goal_position) - np.array(self.start_position))
+        #self.direction_vector = np.array([self.goal_position[0]/self.magnitude, self.goal_position[1]/self.magnitude, self.goal_position[2]/self.magnitude])
+        self.direction_vector = np.array([(self.goal_position[0] - self.start_position[0])/self.magnitude, 
+                                          (self.goal_position[1] - self.start_position[1])/self.magnitude, 
+                                          (self.goal_position[2] - self.start_position[2])/self.magnitude])
+        print(self.magnitude, self.direction_vector)
+        self.setpoint = np.array([self.start_position[0], self.start_position[1], self.start_position[2]])
+        self.setpoint_threshold = 2.0
+
+        # Action Variables
+        self.vel_max = 2
+        self.move_time = 0.2
 
         # Set up rewards
         self.R_l = 0.0
@@ -42,12 +58,32 @@ class AirSimEnv(gymnasium.Env):
         self.del_d_l = -1
         self.del_d_u = 1
 
+        # Spawn Setpoint
+        #setpoint_pose = airsim.Pose()
+        #setpoint_pose.position.x_val = self.setpoint[0]
+        #setpoint_pose.position.z_val = self.setpoint[2]
+        #spawn_scale = airsim.Vector3r(0.5, 0.5, 0.5)
+        #self.client.simSpawnObject('Setpoint', 'Sphere', setpoint_pose, spawn_scale, physics_enabled=False)
+
     @staticmethod
     def start_client():
         client = airsim.MultirotorClient()
         client.confirmConnection()
         client.enableApiControl(True)
         return client
+
+    def sim_initialization(self):
+        self.initial_pose.position.x_val = self.start_position[0]
+        self.initial_pose.position.y_val = self.start_position[1]
+        self.initial_pose.position.z_val = self.start_position[2]
+
+        # Spawn Goal
+        spawn_pose = airsim.Pose()
+        spawn_pose.position.x_val = self.goal_position[0]
+        spawn_pose.position.y_val = self.goal_position[1]
+        spawn_pose.position.z_val = self.goal_position[2]
+        spawn_scale = airsim.Vector3r(self.goal_threshold, self.goal_threshold, self.goal_threshold)
+        self.client.simSpawnObject('Goal', 'Sphere', spawn_pose, spawn_scale, False)
 
     def _get_obs(self):
         return {}
@@ -59,7 +95,9 @@ class AirSimEnv(gymnasium.Env):
         # Reset the environment to the starting state
         self.client.reset()
         self.client.enableApiControl(True)
-        self.current_position = self.start_position
+        self.client.simSetVehiclePose(self.initial_pose, True)
+        self.current_position = np.array([self.start_position[0], self.start_position[1], self.start_position[2]])
+        self.setpoint = np.array([self.start_position[0], self.start_position[1], self.start_position[2]])
         observation = self.current_position  # Set initial observation
         info = self._get_info()  # dictionary for additional information
         return observation, info
@@ -73,70 +111,112 @@ class AirSimEnv(gymnasium.Env):
         position = np.array([x,y,z])
         return position
 
-    def step(self, action):
+    def step(self, action):       
         # Perform action and return next state, reward, done, info
 
         # Get current distance to goal before move
         old_distance = self.calculate_distance_to_goal()
 
+        #print('Info:', self.current_position, self.start_position, self.setpoint)
+        #print('Action', action)
         match action:
             case 0:
-                self.client.moveByVelocityBodyFrameAsync(3, -3, -3, self.move_time).join()
+                self.client.moveByVelocityBodyFrameAsync(self.vel_max, -self.vel_max, -self.vel_max, self.move_time).join()
             case 1:
-                self.client.moveByVelocityBodyFrameAsync(3, 0, -3, self.move_time).join()
+                self.client.moveByVelocityBodyFrameAsync(self.vel_max, 0, -self.vel_max, self.move_time).join()
             case 2:
-                self.client.moveByVelocityBodyFrameAsync(3, 3, -3, self.move_time).join()
+                self.client.moveByVelocityBodyFrameAsync(self.vel_max, self.vel_max, -self.vel_max, self.move_time).join()
             case 3:
-                self.client.moveByVelocityBodyFrameAsync(3, -3, 0, self.move_time).join()
+                self.client.moveByVelocityBodyFrameAsync(self.vel_max, -self.vel_max, 0, self.move_time).join()
             case 4:
-                self.client.moveByVelocityBodyFrameAsync(3, 0, 0, self.move_time).join()
+                self.client.moveByVelocityBodyFrameAsync(self.vel_max, 0, 0, self.move_time).join()
             case 5:
-                self.client.moveByVelocityBodyFrameAsync(3, 3, 0, self.move_time).join()
+                self.client.moveByVelocityBodyFrameAsync(self.vel_max, self.vel_max, 0, self.move_time).join()
             case 6:
-                self.client.moveByVelocityBodyFrameAsync(3, -3, 2, self.move_time).join()
+                self.client.moveByVelocityBodyFrameAsync(self.vel_max, -self.vel_max, self.vel_max, self.move_time).join()
             case 7:
-                self.client.moveByVelocityBodyFrameAsync(3, 0, 2, self.move_time).join()
+                self.client.moveByVelocityBodyFrameAsync(self.vel_max, 0, self.vel_max, self.move_time).join()
             case 8:
-                self.client.moveByVelocityBodyFrameAsync(3, 3, 2, self.move_time).join()
+                self.client.moveByVelocityBodyFrameAsync(self.vel_max, self.vel_max, self.vel_max, self.move_time).join()
+            case _:
+                print('Error')
+            #case 9:
+            #    self.client.moveByVelocityBodyFrameAsync(0, 0, 0, self.move_time).join()
 
         # Update current position
         self.current_position = self.get_position()
+        #print('Position:', self.current_position)
 
         # Find new distance to goal after move
-        new_distance = self.calculate_distance_to_goal()
+        goal_distance = self.calculate_distance_to_goal()
+        new_distance = self.calculate_distance(self.setpoint)
 
         # Get state (observations)
-        state = self.current_position
+        state = self.setpoint - self.current_position
 
+        # Check for collisions
         collision_check = self.client.simGetCollisionInfo().has_collided
-        if collision_check:
-            print("COLLISION! Resetting...")
+        #if collision_check:
+        #    print("COLLISION! Resetting...")
 
         # Calculate reward
-        reward = self.get_reward(old_distance, new_distance, collision_check)
-        print(f'Distance to goal: {new_distance}, Reward: {reward}')
+        reward, chosen = self.get_reward(old_distance, new_distance, goal_distance, collision_check)
+        print(f'Distance to go: {new_distance}, Reward: {reward}, Setpoint: {self.setpoint}, Position: {self.current_position}')
+
+        # Calculate the Moving Setpoint
+        if np.linalg.norm(np.array(self.setpoint) - np.array(self.goal_position)) > 0.3:
+            self.setpoint += self.direction_vector * (self.vel_max * self.move_time)
+
+        # Move Setpoint
+        #setpoint_pose = airsim.Pose()
+        #setpoint_pose.position.x_val = self.setpoint[0]
+        #setpoint_pose.position.z_val = self.setpoint[2]
+        #self.client.simSetObjectPose('Setpoint', setpoint_pose)
 
         # Check if episode is done (close to goal)
-        done = (new_distance < self.goal_threshold)
+        done = (goal_distance < self.goal_threshold)
         if done:
             print("GOAL REACHED!")
+            #reward = 500
 
         info = self._get_info()  # dictionary for additional information
 
-        return state, reward, done, collision_check, info
-
-    def get_reward(self, old_d, new_d, collision_check):
-        # del_d = new_d - old_d
-        # d_t = new_d
-        # if self.del_d_u < del_d:
-        #     return self.R_l/d_t
-
-        if collision_check:
-            return -1
-        if new_d < self.goal_threshold:
-            return 5
+        if done or collision_check:
+            term = True
         else:
-            return -0.01
+            term = False
+
+        return state, reward, term, False, info
+
+    def get_reward(self, old_d, new_d, goal_d, collision_check):
+        #self.R_l = 0.0
+        #self.R_u = 0.5
+        #self.R_dp = -0.5
+        #self.R_cp = -1
+        #self.del_d_l = -1
+        #self.del_d_u = 1
+        
+        # If we have collide, reward with -1
+        if collision_check:
+            reward = -10
+            chosen = 1
+        # If we are far from the setpoint, reward 0
+        elif new_d > self.setpoint_threshold:
+            reward = 0
+            chosen = 2
+        # If we are close to the setpoint, variable reward
+        elif new_d <= self.setpoint_threshold:
+            #reward = self.R_u * ((self.del_d_u - new_d) / (self.del_d_u - self.del_d_l))
+            reward = 0.5
+            chosen = 3
+        else:
+            reward = -0.01
+            chosen = 4    
+        return reward, chosen
+
+    def calculate_distance(self, point):
+        # Calculate distance from current position to goal
+        return np.linalg.norm(np.array(self.current_position) - np.array(point))
 
     def calculate_distance_to_goal(self):
         # Calculate distance from current position to goal
@@ -148,13 +228,12 @@ class AirSimEnv(gymnasium.Env):
         self.client.enableApiControl(False)
 
 
-
 def main():
     # Register the environment
     gymnasium.register(
         id='AirSimEnv-v0',
         entry_point=lambda: AirSimEnv(),
-        max_episode_steps=300
+        max_episode_steps=70
     )
     # gym.envs.register(id='AirSimEnv-v0', entry_point=AirSimEnv)
     temp_env = gymnasium.make('AirSimEnv-v0')
@@ -162,7 +241,7 @@ def main():
 
     model = DQN("MlpPolicy", env, verbose=1)
     print("Starting training...")
-    model.learn(total_timesteps=200, log_interval=4)
+    model.learn(total_timesteps=2000, log_interval=4)
     print("Training complete!")
 
     # Play after training
@@ -171,8 +250,10 @@ def main():
     while True:
         action, _states = model.predict(obs, deterministic=True)
         obs, reward, terminated, truncated = env.step(action)
-        print(f"Terminated: {terminated}, Truncated: {truncated}")
-        if terminated or truncated:
+        
+        #print(f"obs: {obs}, Terminated: {terminated}, Truncated: {truncated}, Reward: {reward}")
+        if terminated:
+            print('RESET')
             obs = env.reset()
 
 

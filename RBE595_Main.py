@@ -7,7 +7,6 @@ import numpy as np
 import os
 import tempfile
 import pprint
-import cv2
 
 # connect to the AirSim simulator
 client = airsim.MultirotorClient()
@@ -46,32 +45,55 @@ client.moveByVelocityBodyFrameAsync(0, 0, -5, 5).join()
 
 # For now, we will define 'forward' as positive X
 # Number of times we want to press the key before stopping
-num_keys = 5
+num_keys = 500
 # Time in s to move
-len_move = 2
+
+vel_max = 2
+move_time = 0.5
 
 for i in range(num_keys):
     key = airsim.wait_key('Press any key to move vehicle. See the code for the movement guide')
     ASKey = key.decode('ASCII')
     match ASKey:
         case 'q':
-            client.moveByVelocityBodyFrameAsync(3, -3, -3, len_move).join()
+            client.moveByVelocityBodyFrameAsync(vel_max, -vel_max, -vel_max, move_time).join()
         case 'w':
-            client.moveByVelocityBodyFrameAsync(3, 0, -3, len_move).join()
+            client.moveByVelocityBodyFrameAsync(vel_max, 0, -vel_max, move_time).join()
         case 'e':
-            client.moveByVelocityBodyFrameAsync(3, 3, -3, len_move).join()
+            client.moveByVelocityBodyFrameAsync(vel_max, vel_max, -vel_max, move_time).join()
         case 'a':
-            client.moveByVelocityBodyFrameAsync(3, -3, 0, len_move).join()
+            client.moveByVelocityBodyFrameAsync(vel_max, -vel_max, 0, move_time).join()
         case 's':
-            client.moveByVelocityBodyFrameAsync(3, 0, 0, len_move).join()
+            client.moveByVelocityBodyFrameAsync(vel_max, 0, 0, move_time).join()
         case 'd':
-            client.moveByVelocityBodyFrameAsync(3, 3, 0, len_move).join()
+            client.moveByVelocityBodyFrameAsync(vel_max, vel_max, 0, move_time).join()
         case 'z':
-            client.moveByVelocityBodyFrameAsync(3, -3, 2, len_move).join()
+            client.moveByVelocityBodyFrameAsync(vel_max, -vel_max, vel_max, move_time).join()
         case 'x':
-            client.moveByVelocityBodyFrameAsync(3, 0, 2, len_move).join()
+            client.moveByVelocityBodyFrameAsync(vel_max, 0, vel_max, move_time).join()
         case 'c':
-            client.moveByVelocityBodyFrameAsync(3, 3, 2, len_move).join()
+            client.moveByVelocityBodyFrameAsync(vel_max, vel_max, vel_max, move_time).join()
+
+
+    #match ASKey:
+    #    case 'q':
+    #        client.moveByVelocityBodyFrameAsync(3, -3, -3, len_move).join()
+    #    case 'w':
+    #        client.moveByVelocityBodyFrameAsync(3, 0, -3, len_move).join()
+    #    case 'e':
+    #        client.moveByVelocityBodyFrameAsync(3, 3, -3, len_move).join()
+    #    case 'a':
+    #        client.moveByVelocityBodyFrameAsync(3, -3, 0, len_move).join()
+    #    case 's':
+    #        client.moveByVelocityBodyFrameAsync(3, 0, 0, len_move).join()
+    #    case 'd':
+    #        client.moveByVelocityBodyFrameAsync(3, 3, 0, len_move).join()
+    #    case 'z':
+    #        client.moveByVelocityBodyFrameAsync(3, -3, 2, len_move).join()
+    #    case 'x':
+    #        client.moveByVelocityBodyFrameAsync(3, 0, 2, len_move).join()
+    #    case 'c':
+    #        client.moveByVelocityBodyFrameAsync(3, 3, 2, len_move).join()
 
 
 # ----- RESET ----- 
