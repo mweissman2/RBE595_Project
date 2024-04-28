@@ -6,6 +6,7 @@ import gym
 import gymnasium
 import pprint
 import math
+import transforms3d.quaternions as quaternions
 import numpy as np
 from stable_baselines3 import DQN
 from stable_baselines3.common.vec_env import DummyVecEnv
@@ -29,7 +30,7 @@ class AirSimEnv(gymnasium.Env):
 
         # Initialize environment variables
         self.start_position = np.array([-5.0, 0.0, -1.0])
-        self.goal_position = np.array([10.0, 0.0, -4.0])
+        self.goal_position = np.array([11.0, 0.0, -1.0])
         self.current_position = self.start_position
         self.goal_threshold = 1.0
         self.initial_pose = self.client.simGetVehiclePose()
@@ -111,6 +112,19 @@ class AirSimEnv(gymnasium.Env):
         position = np.array([x,y,z])
         return position
 
+    def get_rotation_mat(self):
+        quad_state = self.client.getMultirotorState()
+        orientation_quat = quad_state.kinematics_estimated.orientation
+        rotation_matrix = quaternions.quat2mat([orientation_quat.w_val, orientation_quat.x_val,
+                                         orientation_quat.y_val, orientation_quat.z_val])
+        return rotation_matrix
+
+    def _get_obs(self):
+        relative_pos = self.setpoint - self.current_position
+        R = self.get_rotation_mat()
+        relative_pos_transformed = np.dot(R, relative_pos)
+        return relative_pos_transformed
+
     def step(self, action):       
         # Perform action and return next state, reward, done, info
 
@@ -152,7 +166,7 @@ class AirSimEnv(gymnasium.Env):
         new_distance = self.calculate_distance(self.setpoint)
 
         # Get state (observations)
-        state = self.setpoint - self.current_position
+        state = self._get_obs()
 
         # Check for collisions
         collision_check = self.client.simGetCollisionInfo().has_collided
@@ -164,7 +178,7 @@ class AirSimEnv(gymnasium.Env):
         print(f'Distance to go: {new_distance}, Reward: {reward}, Setpoint: {self.setpoint}, Position: {self.current_position}')
 
         # Calculate the Moving Setpoint
-        if np.linalg.norm(np.array(self.setpoint) - np.array(self.goal_position)) > 0.3:
+        if np.linalg.norm(np.array(self.setpoint) - np.array(self.goal_position)) > 0.05:
             self.setpoint += self.direction_vector * (self.vel_max * self.move_time)
 
         # Move Setpoint
@@ -177,7 +191,7 @@ class AirSimEnv(gymnasium.Env):
         done = (goal_distance < self.goal_threshold)
         if done:
             print("GOAL REACHED!")
-            #reward = 500
+            reward = 20
 
         info = self._get_info()  # dictionary for additional information
 
@@ -200,18 +214,21 @@ class AirSimEnv(gymnasium.Env):
         if collision_check:
             reward = -10
             chosen = 1
-        # If we are far from the setpoint, reward 0
-        elif new_d > self.setpoint_threshold:
-            reward = 0
-            chosen = 2
-        # If we are close to the setpoint, variable reward
-        elif new_d <= self.setpoint_threshold:
-            #reward = self.R_u * ((self.del_d_u - new_d) / (self.del_d_u - self.del_d_l))
+        elif new_d < 2:
             reward = 0.5
-            chosen = 3
+            chosen = 2
         else:
-            reward = -0.01
-            chosen = 4    
+            reward = .1 - (1 / new_d)
+            chosen = -1
+        # If we are far from the setpoint, reward 0
+        #elif new_d > self.setpoint_threshold:
+        #    reward = 0
+        #    chosen = 2
+        # If we are close to the setpoint, variable reward
+        #elif new_d <= self.setpoint_threshold:
+        #    #reward = self.R_u * ((self.del_d_u - new_d) / (self.del_d_u - self.del_d_l))
+        #    reward = 0.5
+        #    chosen = 3   
         return reward, chosen
 
     def calculate_distance(self, point):
@@ -233,19 +250,20 @@ def main():
     gymnasium.register(
         id='AirSimEnv-v0',
         entry_point=lambda: AirSimEnv(),
-        max_episode_steps=70
+        max_episode_steps=65
     )
     # gym.envs.register(id='AirSimEnv-v0', entry_point=AirSimEnv)
     temp_env = gymnasium.make('AirSimEnv-v0')
     env = DummyVecEnv([lambda: temp_env])
 
     model = DQN("MlpPolicy", env, verbose=1)
-    print("Starting training...")
-    model.learn(total_timesteps=2000, log_interval=4)
+    airsim.wait_key('Press any key to start training')
+    model.learn(total_timesteps=1500, log_interval=4)
     print("Training complete!")
 
     # Play after training
-    airsim.wait_key('Press any key to reset to original state')
+    airsim.wait_key('Press any key to enter prediction phase')
+    model.save('DQN-No_obstacle-v1')
     obs = env.reset()
     while True:
         action, _states = model.predict(obs, deterministic=True)
