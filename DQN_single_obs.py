@@ -6,6 +6,7 @@ import gym
 import gymnasium
 import pprint
 import numpy as np
+import random
 import transforms3d.quaternions as quaternions
 from stable_baselines3 import DQN
 from stable_baselines3.common.vec_env import DummyVecEnv, VecTransposeImage
@@ -26,21 +27,23 @@ class AirSimEnv(gymnasium.Env):
         self.client = self.start_client()
 
         # Initialize environment variables
-        self.start_position = np.array([-100.0, -60.0, -3.0])
-        self.goal_position = np.array([-45.0, -60.0, -5.0])
+        self.start_position = np.array([-100.0, -57.0, -10.0])
+        self.goal_position = np.array([-45.0, -57.0, -10.0])
         self.current_position = self.start_position.copy()
-        self.goal_threshold = 2.0
+        self.goal_threshold = 5.0
         self.initial_pose = self.client.simGetVehiclePose()
         self.initial_pose.position.x_val = self.start_position[0]
         self.initial_pose.position.y_val = self.start_position[1]
         self.initial_pose.position.z_val = self.start_position[2]
-        self.vel_step = 3
-        self.move_time = 0.2
+        self.vel_step = 10.0
+        self.move_time = 0.4
 
         # Set point
-        self.set_point_start_pos = np.array([-100.0, -60.0, -5.0])
+        self.spawn_setpoint = True
+        self.viz_offset = -15.0
+        self.set_point_start_pos = np.array([-100.0, -57.0, -10.0])
         self.set_point_position = self.set_point_start_pos.copy()
-        self.set_point_speed = 3.0
+        self.set_point_speed = self.vel_step
         self.magnitude = np.linalg.norm(np.array(self.goal_position) - np.array(self.set_point_start_pos))
         self.direction_vector = np.array([(self.goal_position[0] - self.set_point_start_pos[0])/self.magnitude,
                                           (self.goal_position[1] - self.set_point_start_pos[1])/self.magnitude,
@@ -76,31 +79,46 @@ class AirSimEnv(gymnasium.Env):
 
     def sim_initialization(self):
         # Spawn Goal
+        if "Goal" in self.client.simListSceneObjects():
+            self.client.simDestroyObject("Goal")
         spawn_pose = airsim.Pose()
         spawn_pose.position.x_val = self.goal_position[0]
         spawn_pose.position.y_val = self.goal_position[1]
         spawn_pose.position.z_val = self.goal_position[2]
-        spawn_scale = airsim.Vector3r(2.0, 2.0, 2.0)
+        spawn_scale = airsim.Vector3r(0.3, 0.3, 0.3)
         self.client.simSpawnObject('Goal', 'Sphere', spawn_pose, spawn_scale, False)
 
         # Spawn setpoint
-        if "Setpoint" not in self.client.simListSceneObjects():
-            spawn_pose = airsim.Pose()
-            spawn_pose.position.x_val = self.set_point_position[0]
-            spawn_pose.position.y_val = self.set_point_position[1]
-            spawn_pose.position.z_val = self.set_point_position[2]
-            print("spawning setpoint")
-            spawn_scale = airsim.Vector3r(0.5, 0.5, 0.5)
-            self.client.simSpawnObject('Setpoint', 'Sphere', self.initial_pose, spawn_scale, False)
-        else:
-            self.reset_setpoint()
+        if self.spawn_setpoint:
+            if "Setpoint" not in self.client.simListSceneObjects():
+                spawn_pose = airsim.Pose()
+                spawn_pose.position.x_val = self.set_point_position[0]
+                spawn_pose.position.y_val = self.set_point_position[1]
+                spawn_pose.position.z_val = self.set_point_position[2] + self.viz_offset
+                print("spawning setpoint")
+                spawn_scale = airsim.Vector3r(0.5, 0.5, 0.5)
+                self.client.simSpawnObject('Setpoint', 'Sphere', self.initial_pose, spawn_scale, False)
+            else:
+                self.reset_setpoint()
     def reset_setpoint(self):
         self.set_point_position = self.set_point_start_pos.copy()  # Reset set point pos
+
+        if self.spawn_setpoint:
+            temp_pose = airsim.Pose()
+            temp_pose.position.x_val = self.set_point_position[0]
+            temp_pose.position.y_val = self.set_point_position[1]
+            temp_pose.position.z_val = self.set_point_position[2] + self.viz_offset
+            self.client.simSetObjectPose('Setpoint', temp_pose, teleport=True)
+
+    def reset_goal(self):
+        rand_num = random.randint(-5,5)
+        self.goal_position = np.array([-45.0, -57.0 + rand_num, -10.0])  # Reset set point pos
+
         temp_pose = airsim.Pose()
-        temp_pose.position.x_val = self.set_point_position[0]
-        temp_pose.position.y_val = self.set_point_position[1]
-        temp_pose.position.z_val = self.set_point_position[2]
-        self.client.simSetObjectPose('Setpoint', temp_pose, teleport=True)
+        temp_pose.position.x_val = self.goal_position[0]
+        temp_pose.position.y_val = self.goal_position[1]
+        temp_pose.position.z_val = self.goal_position[2]
+        self.client.simSetObjectPose('Goal', temp_pose, teleport=True)
 
     def get_rotation_mat(self):
         quad_state = self.client.getMultirotorState()
@@ -128,6 +146,7 @@ class AirSimEnv(gymnasium.Env):
 
         self.current_position = self.start_position.copy()
 
+        self.reset_goal()
         self.reset_setpoint()
 
         observation = self._get_obs()  # Set initial observation
@@ -186,6 +205,7 @@ class AirSimEnv(gymnasium.Env):
 
         # Initialize done flag
         done = False
+        truncate = False
 
         # Check collision
         collision_check = self.client.simGetCollisionInfo().has_collided
@@ -195,7 +215,6 @@ class AirSimEnv(gymnasium.Env):
 
         # Calculate reward
         reward = self.get_reward(old_distance, new_distance, collision_check)
-        print(f'Distance to setpoint: {new_distance}, Setpoint Position: {self.set_point_position}, Reward: {reward}')
         # print(f'Observation: {obs}')
 
         # Check if episode is done (close to goal)
@@ -203,39 +222,55 @@ class AirSimEnv(gymnasium.Env):
         goal_reached = (distance_to_goal < self.goal_threshold)
         if goal_reached:
             done = True
-            reward = 20
+            reward = 100
             print("GOAL REACHED!")
+
+        if self.current_position[0] > self.goal_position[0]:
+            truncate = True
+            reward = -20
 
         info = self._get_info()  # dictionary for additional information
 
-        return obs, reward, done, False, info
+        print(f'Distance to setpoint: {new_distance}, Setpoint Position: {self.set_point_position}, Reward: {reward}')
+
+        return obs, reward, done, truncate, info
 
     def get_reward(self, old_d, new_d, collision_check):
-        # del_d = new_d - old_d
-        # d_t = new_d
-        #
-        # if collision_check:
-        #     reward = -1
-        # elif self.del_d_u < del_d:
-        #     reward = self.R_l/d_t
-        # elif del_d >= self.del_d_l and del_d <= self.del_d_u:
-        #     reward = self.R_l + (self.R_u - self.R_l) * ((self.del_d_u - del_d) / (self.del_d_u - self.del_d_l))
-        # elif del_d < self.del_d_l:
-        #     reward = self.R_u/d_t
-        # else:
-        #     reward = self.R_dp
-        #
+        del_d = new_d - old_d
+        d_t = new_d
 
         if collision_check:
-            reward = -10
-            chosen = 1
-        elif new_d < 2:
-            reward = 0.5
-            chosen = 2
+            reward = -1
+        elif self.del_d_u < del_d:
+            reward = self.R_l/d_t
+        elif del_d >= self.del_d_l and del_d <= self.del_d_u:
+            reward = self.R_l + (self.R_u - self.R_l) * ((self.del_d_u - del_d) / (self.del_d_u - self.del_d_l))
+        elif del_d < self.del_d_l:
+            reward = self.R_u/d_t
         else:
-            reward = .1 - (1 / new_d)
-            chosen = -1
+            reward = self.R_dp
 
+
+        # if collision_check:
+        #     reward = -50
+        #     chosen = 1
+        # elif new_d < 2:
+        #     reward = 0.5
+        #     chosen = 2
+        # else:
+        #     reward = (1 / new_d**2)
+        #     chosen = -1
+        #
+        # return reward
+
+
+        if collision_check:
+            reward = -50
+        else:
+            x_distance = abs(self.current_position[0] - self.set_point_position[0])
+            y_distance = abs(self.current_position[1] - self.set_point_position[1])
+            z_distance = abs(self.current_position[2] - self.set_point_position[2])
+            reward = -((0.2 * x_distance) + (0.4 * y_distance) + (0.4 * z_distance))
         return reward
 
     def calculate_distance_to_goal(self):
@@ -249,14 +284,18 @@ class AirSimEnv(gymnasium.Env):
     def move_setpoint(self):
         distance_to_goal = np.linalg.norm(np.array(self.set_point_position) - np.array(self.goal_position))
         # print(f'Distance from point to goal: {distance_to_goal}')
-        if distance_to_goal > 0.5:
-            self.set_point_position += self.direction_vector * (self.set_point_speed * self.move_time)
+        if distance_to_goal >= 4:
+            # self.set_point_position += self.direction_vector * (self.set_point_speed * self.move_time)
+            self.set_point_position += self.direction_vector * (self.set_point_speed * 0.4)
+        else:
+            self.set_point_position = self.goal_position.copy()
 
+        if self.spawn_setpoint:
             temp_pose = airsim.Pose()
             temp_pose.position.x_val = self.set_point_position[0].copy()
             temp_pose.position.y_val = self.set_point_position[1].copy()
-            temp_pose.position.z_val = self.set_point_position[2].copy()
-            self.client.simSetObjectPose('Setpoint', temp_pose, teleport=True)
+            temp_pose.position.z_val = self.set_point_position[2].copy() + self.viz_offset
+            self.client.simSetObjectPose('Setpoint', temp_pose)
 
     def get_depth_img(self):
         responses = self.client.simGetImages([airsim.ImageRequest(0, airsim.ImageType.DepthPlanar, pixels_as_float=True)])
@@ -274,13 +313,12 @@ class AirSimEnv(gymnasium.Env):
         self.client.enableApiControl(False)
 
 
-
 def main():
     # Register the environment
     gymnasium.register(
         id='AirSimEnv-v0',
         entry_point=lambda: AirSimEnv(),
-        max_episode_steps=60,
+        max_episode_steps=30,
     )
     # gym.envs.register(id='AirSimEnv-v0', entry_point=AirSimEnv)
     temp_env = gymnasium.make('AirSimEnv-v0')
@@ -291,7 +329,7 @@ def main():
     model = DQN(
         "MultiInputPolicy",
         env,
-        learning_rate=0.00025,
+        # learning_rate=0.00025,
         verbose=1,
         batch_size=32,
         train_freq=4,
@@ -301,9 +339,10 @@ def main():
         max_grad_norm=10,
         exploration_fraction=0.1,
         exploration_final_eps=0.01,
+        # tensorboard_log="./tb_logs/",
     )
     print("Starting training...")
-    model.learn(total_timesteps=4000, log_interval=5)
+    model.learn(total_timesteps=1000, log_interval=5)
     print("Training complete!")
 
     model.save('DQN-No_obstacle-v1')
