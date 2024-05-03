@@ -16,7 +16,7 @@ Additional steps:
   - We ran this in an Anaconda environment, that is the recommended way to run this code. The python version is Python 3.12.3 with Anaconda3 
   - Make sure the 'Block' environment is running once you run one of the python files.
   - Make sure the 'AirSim' Git repository folder is installed at the same location as the python files (Like in this GitHub repo)
-  - To run one of the python files, either run from your preffered IDE, or run the file from a terminal with: python <filename.py>
+  - To run one of the python files, either run from your preffered IDE, or run the file from a terminal with: ```python <filename.py>```
 
 Additional Information:
   - If there is an issue with not enough space required for the bufferm the 'buffer_size' value can be modified.
