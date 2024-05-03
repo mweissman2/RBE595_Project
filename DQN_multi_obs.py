@@ -316,7 +316,7 @@ class AirSimEnv(gymnasium.Env):
 
     def get_reward(self, collision_check):
         """
-        Calculates the reward using the current positiona dnd setpoint position
+        Calculates the reward using the current position and setpoint position
         Return: reward value (float)
         """
         if collision_check:
@@ -351,7 +351,7 @@ def main():
         train_freq=4,
         target_update_interval=10000,
         learning_starts=10000,
-        buffer_size=500000,
+        buffer_size=50000,
         max_grad_norm=10,
         exploration_fraction=0.1,
         exploration_final_eps=0.01,
